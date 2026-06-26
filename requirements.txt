@@ -1,0 +1,16 @@
+# Core dependencies
+SpeechRecognition>=3.10.0   # audio capture + VAD
+vosk>=0.3.45                # 100% on-device speech recognition (no internet)
+pyttsx3>=2.90               # offline text-to-speech (pyttsx3 is optional; OS native TTS is the fallback)
+ollama>=0.2.0               # Ollama Python client
+
+# Audio input — install ONE of the two options below:
+# Option A: PyAudio (needs portaudio system package on Linux/macOS)
+pyaudio>=0.2.13
+# Option B: sounddevice + numpy (easier cross-platform, uncomment if pyaudio fails)
+# sounddevice>=0.4.6
+# numpy>=1.24.0
+
+# Optional — higher quality TTS voices (requires internet):
+# edge-tts>=6.1.9
+# pygame>=2.5.0
