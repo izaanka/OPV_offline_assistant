@@ -1292,34 +1292,58 @@ def select_vosk_model(explicit_path: Optional[str]) -> str:
 PIPER_VOICE_CATALOGUE = {
     "male": [
         {
+            "name": "en_US-danny-low",
+            "desc": "Danny (Small & Fast, ~15 MB) — Ultra-low latency voice",
+            "hf_path": "en/en_US/danny/low",
+            "files": ["en_US-danny-low.onnx", "en_US-danny-low.onnx.json"],
+        },
+        {
+            "name": "en_US-ryan-medium",
+            "desc": "Ryan (Medium, ~60 MB) — Balanced speed & naturalness",
+            "hf_path": "en/en_US/ryan/medium",
+            "files": ["en_US-ryan-medium.onnx", "en_US-ryan-medium.onnx.json"],
+        },
+        {
             "name": "en_US-ryan-high",
-            "desc": "Ryan (high quality, ~120 MB)",
+            "desc": "Ryan (Large & High Quality, ~120 MB) — ★ Deep, studio quality male voice",
             "hf_path": "en/en_US/ryan/high",
             "files": ["en_US-ryan-high.onnx", "en_US-ryan-high.onnx.json"],
         },
     ],
     "female": [
         {
+            "name": "en_US-kathleen-low",
+            "desc": "Kathleen (Small & Fast, ~15 MB) — Ultra-low latency voice",
+            "hf_path": "en/en_US/kathleen/low",
+            "files": ["en_US-kathleen-low.onnx", "en_US-kathleen-low.onnx.json"],
+        },
+        {
             "name": "en_US-amy-medium",
-            "desc": "Amy (medium quality, ~60 MB)",
+            "desc": "Amy (Medium, ~60 MB) — Balanced speed & high naturalness",
             "hf_path": "en/en_US/amy/medium",
             "files": ["en_US-amy-medium.onnx", "en_US-amy-medium.onnx.json"],
         },
         {
             "name": "en_US-lessac-high",
-            "desc": "Lessac (high quality, ~120 MB)",
+            "desc": "Lessac (Large & High Quality, ~120 MB) — ★ Clear, studio quality female voice",
             "hf_path": "en/en_US/lessac/high",
             "files": ["en_US-lessac-high.onnx", "en_US-lessac-high.onnx.json"],
+        },
+        {
+            "name": "en_US-libritts_r-medium",
+            "desc": "LibriTTS (Medium, ~60 MB) — Natural expressive female voice",
+            "hf_path": "en/en_US/libritts_r/medium",
+            "files": ["en_US-libritts_r-medium.onnx", "en_US-libritts_r-medium.onnx.json"],
         },
     ],
 }
 
 # Keywords used to guess gender from pyttsx3 voice names
 _MALE_KEYWORDS   = {"david", "mark", "daniel", "james", "michael", "george",
-                    "thomas", "richard", "male", "man", "guy", "ryan"}
+                    "thomas", "richard", "male", "man", "guy", "ryan", "danny"}
 _FEMALE_KEYWORDS = {"zira", "hazel", "victoria", "samantha", "lisa", "karen",
                     "susan", "amy", "alice", "emma", "female", "woman", "girl",
-                    "kathleen", "jenny"}
+                    "kathleen", "jenny", "lessac", "libritts"}
 
 
 def _download_piper_voice(voice_info: dict) -> str:
@@ -1335,7 +1359,7 @@ def _download_piper_voice(voice_info: dict) -> str:
             try:
                 def _hook(count, block, total):
                     if total > 0:
-                        print(f"\r  {int(count*block*100/total)}% ", end="", flush=True)
+                        print(f"\r  Progress: {int(count*block*100/total)}% ", end="", flush=True)
                 _ur.urlretrieve(f"{base}/{fname}", dest, _hook)
                 print()
             except Exception as e:
@@ -1350,9 +1374,9 @@ def _download_piper_voice(voice_info: dict) -> str:
 
 def select_tts_voice(args) -> tuple:
     """
-    Show a Male / Female picker and return (piper_voice_path, voice_id, tts_mode).
+    Show a Male / Female picker and a Voice Model quality picker, returning (piper_voice_path, voice_id, tts_mode).
     Handles Piper, pyttsx3, edge-tts, and system TTS.
-    Skips the prompt if --gender or --piper-voice / --voice is already supplied.
+    Skips the prompt if --piper-voice or --voice is already supplied on CLI.
     """
     tts_mode       = args.tts
     piper_voice_path = getattr(args, "piper_voice", None)
@@ -1386,42 +1410,44 @@ def select_tts_voice(args) -> tuple:
     print()
     success(f"Voice gender: {gender.capitalize()}")
 
-    # ── Piper ─────────────────────────────────────────────────────────────────
+    # ── Piper Voice Model Quality Picker ──────────────────────────────────────
     if tts_mode == "piper":
         catalogue = PIPER_VOICE_CATALOGUE[gender]
 
-        # Find already-downloaded voices for this gender
-        available = []
-        for v in catalogue:
-            onnx = os.path.join(PIPER_VOICE_DIR, v["files"][0])
-            if os.path.isfile(onnx):
-                available.append((v, onnx))
+        print(f"\n{BOLD}{CYAN}Select a {gender.capitalize()} Piper voice model (Speed / Quality):{RESET}")
+        print(c("─" * 65, DIM))
 
-        if len(available) == 1:
-            info(f"Using Piper voice: {available[0][0]['name']}")
-            return available[0][1], None, tts_mode
+        choices = []
+        default_idx = 1
+        for i, v in enumerate(catalogue, 1):
+            onnx_path = os.path.join(PIPER_VOICE_DIR, v["files"][0])
+            downloaded = os.path.isfile(onnx_path)
+            status = c("[Ready]", GREEN) if downloaded else c("[Download required]", YELLOW)
+            if downloaded and default_idx == 1:
+                default_idx = i
+            choices.append((v, onnx_path, downloaded))
+            print(f"  {c(f'[{i}]', CYAN)} {v['desc']}  {status}")
+            print(f"      {c(v['name'], DIM)}")
+        print(c("─" * 65, DIM))
+        print(f"  {c('[Enter]', DIM)} use default ({default_idx})")
+        print()
 
-        if len(available) > 1:
-            # Let user pick among downloaded ones
-            print(f"\n{BOLD}{CYAN}Available {gender} Piper voices:{RESET}")
-            print(c("─" * 50, DIM))
-            for i, (v, _) in enumerate(available, 1):
-                print(f"  {c(f'[{i}]', CYAN)} {v['desc']}  {c(v['name'], DIM)}")
-            print(c("─" * 50, DIM))
-            try:
-                raw2 = input(f"{BOLD}Your choice (1-{len(available)}) [Enter=1]: {RESET}").strip()
-            except (KeyboardInterrupt, EOFError):
-                raw2 = ""
-            idx = (int(raw2) - 1) if raw2.isdigit() and 1 <= int(raw2) <= len(available) else 0
-            chosen_v, onnx_path = available[idx]
-            success(f"Selected: {chosen_v['name']}")
-            return onnx_path, None, tts_mode
+        try:
+            raw2 = input(f"{BOLD}Your choice (1-{len(choices)}): {RESET}").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            raw2 = ""
 
-        # Nothing downloaded yet — download the first option for this gender
-        v = catalogue[0]
-        print(f"{YELLOW}No {gender} Piper voice found locally.{RESET}")
-        info(f"Downloading {v['desc']} …")
-        onnx_path = _download_piper_voice(v)
+        idx = (int(raw2) - 1) if raw2.isdigit() and 1 <= int(raw2) <= len(choices) else (default_idx - 1)
+        chosen_v, onnx_path, is_ready = choices[idx]
+
+        if not is_ready:
+            info(f"Downloading {chosen_v['desc']} …")
+            onnx_path = _download_piper_voice(chosen_v)
+
+        success(f"Selected Piper voice model: {chosen_v['name']}")
+        args.gender = gender
+        args.piper_voice = onnx_path
         return onnx_path, None, tts_mode
 
     # ── edge-tts ──────────────────────────────────────────────────────────────
