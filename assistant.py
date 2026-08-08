@@ -603,10 +603,28 @@ class SpeechListener:
                     timeout=1.5, phrase_limit=2.0, burst_mode=True
                 )
 
-            if text and any(w in text.lower().split() for w in stop_words):
-                return True
-
         return False
+
+    def _transcribe(self, audio, recognizer=None) -> Optional[str]:
+        """Transcribe audio to text using Vosk and normalize phonetics/cities."""
+        try:
+            raw = audio.get_raw_data(convert_rate=16000, convert_width=2)
+            rec = vosk.KaldiRecognizer(self._vosk_model, 16000)
+            rec.AcceptWaveform(raw)
+            result = json.loads(rec.FinalResult())
+            text = result.get("text", "").strip()
+            if text:
+                normalized = normalize_utterance(text)
+                if normalized != text:
+                    info(f"Phonetic normalized: '{text}' → '{normalized}'")
+                return normalized
+            return None
+        except Exception as e:
+            warn(f"Vosk transcription error: {e}")
+            return None
+
+    def contains_wake_word(self, text: str, wake_word: str) -> bool:
+        return wake_word.lower() in text.lower().split()
 
 # ─── Phonetic Aliases & City/Name Gazetteer Normalization ───────────────────────
 ALIASES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".aliases.json")
@@ -709,28 +727,6 @@ def normalize_utterance(text: str) -> str:
         i += 1
 
     return ' '.join(corrected_words)
-
-
-    def _transcribe(self, audio, recognizer=None) -> Optional[str]:
-        """Transcribe audio to text using Vosk and normalize phonetics/cities."""
-        try:
-            raw = audio.get_raw_data(convert_rate=16000, convert_width=2)
-            rec = vosk.KaldiRecognizer(self._vosk_model, 16000)
-            rec.AcceptWaveform(raw)
-            result = json.loads(rec.FinalResult())
-            text = result.get("text", "").strip()
-            if text:
-                normalized = normalize_utterance(text)
-                if normalized != text:
-                    info(f"Phonetic normalized: '{text}' → '{normalized}'")
-                return normalized
-            return None
-        except Exception as e:
-            warn(f"Vosk transcription error: {e}")
-            return None
-
-    def contains_wake_word(self, text: str, wake_word: str) -> bool:
-        return wake_word.lower() in text.lower().split()
 
 
 # ─── Long-term Memory (.memory) ───────────────────────────────────────────────
