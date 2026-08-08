@@ -16,5 +16,7 @@ vosk-models/
 # Local runtime config & memory
 .config
 .memory
+.aliases.json
+
 
 

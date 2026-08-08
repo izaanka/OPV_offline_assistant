@@ -608,16 +608,123 @@ class SpeechListener:
 
         return False
 
-    def _transcribe(self, audio, recognizer=None) -> Optional[str]:
-        """Transcribe audio to text using Vosk (fully offline, no internet)."""
+# ─── Phonetic Aliases & City/Name Gazetteer Normalization ───────────────────────
+ALIASES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".aliases.json")
+
+DEFAULT_ALIASES = {
+    "is on": "Izaan",
+    "is an": "Izaan",
+    "eyes on": "Izaan",
+    "ezan": "Izaan",
+    "izan": "Izaan",
+    "daily": "Delhi",
+    "dilli": "Delhi",
+    "del hi": "Delhi",
+    "bomb bay": "Mumbai",
+    "mombay": "Mumbai",
+    "bang a door": "Bengaluru",
+    "bangalore": "Bengaluru",
+    "bengaluru": "Bengaluru",
+    "call cut a": "Kolkata",
+    "kolkata": "Kolkata"
+}
+
+GLOBAL_CITIES = [
+    "Delhi", "Mumbai", "Bengaluru", "Kolkata", "Chennai", "Hyderabad", "Ahmedabad", "Pune",
+    "Jaipur", "Surat", "Lucknow", "Kanpur", "Nagpur", "Indore", "Bhopal", "Patna", "Vadodara",
+    "Ludhiana", "Agra", "Nashik", "Faridabad", "Meerut", "Rajkot", "Kalyan", "Varanasi",
+    "Srinagar", "Aurangabad", "Dhanbad", "Amritsar", "Navi Mumbai", "Allahabad", "Ranchi",
+    "Howrah", "Coimbatore", "Jabalpur", "Gwalior", "Vijayawada", "Jodhpur", "Madurai",
+    "Raipur", "Kota", "Guwahati", "Chandigarh", "Solapur", "Hubli", "Bareilly", "Moradabad",
+    "Mysore", "Gurgaon", "Aligarh", "Jalandhar", "Tiruchirappalli", "Bhubaneswar", "Salem",
+    "Warangal", "Mira-Bhayandar", "Thiruvananthapuram", "Bhiwandi", "Saharanpur", "Guntur",
+    "Amravati", "Bikaner", "Noida", "Jamshedpur", "Bhilai", "Cuttack", "Firozabad", "Kochi",
+    "Bhavnagar", "Dehradun", "Durgapur", "Asansol", "Nanded", "Kolhapur", "Ajmer", "Gulbarga",
+    "Jamnagar", "Ujjain", "Loni", "Siliguri", "Jhansi", "Ulhasnagar", "Jammu", "Sangli",
+    "Mangalore", "Erode", "Belgaum", "Ambattur", "Tirunelveli", "Malegaon", "Gaya", "Jalgaon",
+    "Udaipur", "London", "Paris", "New York", "Tokyo", "Berlin", "Beijing", "Shanghai",
+    "Sydney", "Toronto", "Dubai", "Singapore", "Rome", "Madrid", "Chicago", "Los Angeles",
+    "San Francisco", "Seattle", "Washington", "Boston", "Moscow", "Seoul", "Bangkok"
+]
+CITY_LOWER_MAP = {c.lower(): c for c in GLOBAL_CITIES}
+
+def load_aliases() -> dict:
+    """Load phonetic sound-alike mappings from .aliases.json."""
+    aliases = dict(DEFAULT_ALIASES)
+    if os.path.isfile(ALIASES_FILE):
         try:
-            # Convert captured audio to 16kHz mono 16-bit PCM for Vosk
+            with open(ALIASES_FILE, "r", encoding="utf-8") as f:
+                custom = json.load(f)
+                if isinstance(custom, dict):
+                    aliases.update(custom)
+        except Exception as e:
+            warn(f"Could not load .aliases.json ({e})")
+    return aliases
+
+def save_alias(phrase: str, correction: str):
+    """Save a custom sound-alike phrase to .aliases.json."""
+    aliases = load_aliases()
+    aliases[phrase.lower().strip()] = correction.strip()
+    try:
+        with open(ALIASES_FILE, "w", encoding="utf-8") as f:
+            json.dump(aliases, f, indent=2)
+    except Exception as e:
+        warn(f"Could not save .aliases.json ({e})")
+
+def normalize_utterance(text: str) -> str:
+    """Post-process raw speech-to-text output using phonetic aliases & city gazetteer fuzzy matching."""
+    if not text:
+        return text
+
+    import re
+    import difflib
+
+    result = text
+
+    # 1. Apply phonetic aliases
+    aliases = load_aliases()
+    for phrase, correction in aliases.items():
+        pattern = re.compile(r'\b' + re.escape(phrase) + r'\b', re.IGNORECASE)
+        result = pattern.sub(correction, result)
+
+    # 2. Fuzzy city correction after prepositions (in, at, near, for, weather, climate, from)
+    words = result.split()
+    corrected_words = []
+    i = 0
+    while i < len(words):
+        word = words[i]
+        clean_w = re.sub(r'[^a-zA-Z]', '', word).lower()
+        prev = words[i-1].lower() if i > 0 else ''
+        if prev in ('in', 'at', 'near', 'for', 'weather', 'climate', 'from') and len(clean_w) >= 3:
+            if clean_w in CITY_LOWER_MAP:
+                corrected_words.append(CITY_LOWER_MAP[clean_w])
+                i += 1
+                continue
+            matches = difflib.get_close_matches(clean_w, CITY_LOWER_MAP.keys(), n=1, cutoff=0.7)
+            if matches:
+                corrected_words.append(CITY_LOWER_MAP[matches[0]])
+                i += 1
+                continue
+        corrected_words.append(word)
+        i += 1
+
+    return ' '.join(corrected_words)
+
+
+    def _transcribe(self, audio, recognizer=None) -> Optional[str]:
+        """Transcribe audio to text using Vosk and normalize phonetics/cities."""
+        try:
             raw = audio.get_raw_data(convert_rate=16000, convert_width=2)
             rec = vosk.KaldiRecognizer(self._vosk_model, 16000)
             rec.AcceptWaveform(raw)
             result = json.loads(rec.FinalResult())
             text = result.get("text", "").strip()
-            return text if text else None
+            if text:
+                normalized = normalize_utterance(text)
+                if normalized != text:
+                    info(f"Phonetic normalized: '{text}' → '{normalized}'")
+                return normalized
+            return None
         except Exception as e:
             warn(f"Vosk transcription error: {e}")
             return None
@@ -1082,6 +1189,17 @@ class VoiceAssistant:
                 success(f"Saved to .memory: {fact}")
                 self.tts.speak("I have saved that to my long term memory.")
             return True
+
+        # Alias command (e.g. "alias daily as Delhi", "alias is on as Izaan")
+        if cmd.startswith("alias ") and " as " in cmd:
+            parts = user_input[6:].split(" as ", 1)
+            if len(parts) == 2:
+                phrase, correction = parts[0].strip(), parts[1].strip()
+                if phrase and correction:
+                    save_alias(phrase, correction)
+                    success(f"Saved sound-alike alias: '{phrase}' → '{correction}'")
+                    self.tts.speak(f"Got it! I will now recognize {phrase} as {correction}.")
+                    return True
         if cmd in ("clear memory", "forget memory", "reset memory"):
             save_memory([])
             success("Long-term memory cleared.")
