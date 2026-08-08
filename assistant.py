@@ -915,15 +915,20 @@ def get_online_context(user_input: str) -> Optional[str]:
 
 # ─── Ollama Client ─────────────────────────────────────────────────────────────
 class OllamaLLM:
-    def __init__(self, model: str = DEFAULT_MODEL):
-        self.model   = model
-        self.history = []  # list of {"role": ..., "content": ...}
+    def __init__(self, model: str = DEFAULT_MODEL, assistant_name: str = "Assistant"):
+        self.model          = model
+        self.assistant_name = assistant_name
+        self.history        = []  # list of {"role": ..., "content": ...}
 
     def reset(self):
         self.history.clear()
 
     def _get_system_prompt(self) -> str:
-        prompt = SYSTEM_PROMPT
+        prompt = f"You are {self.assistant_name}, a warm, friendly, and empathetic companion and voice assistant.\n" + \
+                 "Speak casually and naturally like a real human friend — relaxed, conversational, and concise (aim for 1-2 short natural sentences).\n" + \
+                 "NEVER use robotic AI clichés like \"functioning properly\", \"I don't have feelings like humans do\", \"as an AI\", or formal corporate scripts.\n" + \
+                 "If you know the user's name or facts from long-term memory, address them by their name naturally in conversation.\n" + \
+                 "Do not use markdown formatting, bullet points, or special symbols."
         facts = load_memory()
         if facts:
             facts_str = "\n".join(f"- {f}" for f in facts)
@@ -1032,20 +1037,22 @@ class OllamaLLM:
 # ─── Main Assistant Loop ───────────────────────────────────────────────────────
 class VoiceAssistant:
     def __init__(self, model: str, tts_mode: str, voice_id: Optional[str], tts_rate: int,
-                 wake_word: str, vosk_model_path: Optional[str] = None,
+                 wake_word: str, assistant_name: str = "Assistant", vosk_model_path: Optional[str] = None,
                  piper_voice_path: Optional[str] = None):
-        self.wake_word = wake_word.lower()
-        self.llm       = OllamaLLM(model=model)
-        self.tts       = TTSEngine(mode=tts_mode, voice_id=voice_id, rate=tts_rate,
-                                   piper_voice_path=piper_voice_path)
-        self.listener  = SpeechListener(vosk_model_path=vosk_model_path)
-        self._running  = False
+        self.wake_word      = wake_word.lower()
+        self.assistant_name = assistant_name.strip()
+        self.llm            = OllamaLLM(model=model, assistant_name=self.assistant_name)
+        self.tts            = TTSEngine(mode=tts_mode, voice_id=voice_id, rate=tts_rate,
+                                       piper_voice_path=piper_voice_path)
+        self.listener       = SpeechListener(vosk_model_path=vosk_model_path)
+        self._running       = False
 
     def _print_banner(self):
         banner = f"""
 {BOLD}{CYAN}╔══════════════════════════════════════════════╗
 ║       🎙️  Local AI Voice Assistant           ║
 ╚══════════════════════════════════════════════╝{RESET}
+  Name     : {c(self.assistant_name, GREEN)}
   Model    : {c(self.llm.model, GREEN)}
   Wake word: {c(f'"{self.wake_word}"', YELLOW)}
   TTS      : {c(self.tts.mode, MAGENTA)}
@@ -1771,6 +1778,49 @@ def save_config(cfg: dict):
         warn(f"Could not save configuration to .config ({e})")
 
 
+def select_wake_word_and_name(args, config: dict) -> tuple:
+    """Prompt user to choose custom wake word and assistant name if not in config or CLI."""
+    wake_word = getattr(args, "wake_word", None)
+    assistant_name = getattr(args, "assistant_name", None)
+
+    # 1. Restore from config if available and not reconfiguring
+    if not args.reconfigure:
+        if config.get("wake_word") and (not wake_word or wake_word == DEFAULT_WAKE_WORD):
+            wake_word = config["wake_word"]
+        if config.get("assistant_name"):
+            assistant_name = config["assistant_name"]
+
+    # 2. If wake_word or assistant_name is missing/default, prompt interactively
+    if not wake_word or wake_word == DEFAULT_WAKE_WORD or not assistant_name:
+        print(f"\n{BOLD}{CYAN}Select Assistant Name & Wake Word:{RESET}")
+        print(c("─" * 60, DIM))
+        print(f"  Set the name and wake word to call your assistant")
+        print(f"  Examples: {c('hey', GREEN)}, {c('jarvis', GREEN)}, {c('alexa', GREEN)}, {c('friday', GREEN)}")
+        print(c("─" * 60, DIM))
+        default_val = wake_word if (wake_word and wake_word != DEFAULT_WAKE_WORD) else "hey"
+        print(f"  {c('[Enter]', DIM)} use default ({c(f'\"{default_val}\"', GREEN)})")
+        print()
+
+        try:
+            raw = input(f"{BOLD}Assistant Name / Wake Word [{default_val}]: {RESET}").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            raw = ""
+
+        if raw:
+            wake_word = raw.lower()
+            assistant_name = raw.capitalize()
+        else:
+            wake_word = default_val.lower()
+            assistant_name = "Assistant" if default_val.lower() == "hey" else default_val.capitalize()
+
+    if not assistant_name:
+        assistant_name = "Assistant" if wake_word == "hey" else wake_word.capitalize()
+
+    success(f"Assistant Name: {c(assistant_name, GREEN)} | Wake Word: {c(f'\"{wake_word}\"', YELLOW)}")
+    return wake_word, assistant_name
+
+
 # ─── Entry Point ───────────────────────────────────────────────────────────────
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -1786,22 +1836,23 @@ Examples:
   python assistant.py --list-voices
         """
     )
-    parser.add_argument("--model",       default=None,
+    parser.add_argument("--model",          default=None,
                         help="Ollama model to use (omit to pick interactively from installed models)")
-    parser.add_argument("--wake-word",   default=DEFAULT_WAKE_WORD, help=f"Wake word to listen for (default: {DEFAULT_WAKE_WORD})")
-    parser.add_argument("--tts",         choices=["piper", "pyttsx3", "edge", "none"],
+    parser.add_argument("--wake-word",      default=DEFAULT_WAKE_WORD, help=f"Wake word to listen for (default: {DEFAULT_WAKE_WORD})")
+    parser.add_argument("--assistant-name", default=None, help="Name of the assistant (default: Assistant or wake word)")
+    parser.add_argument("--tts",            choices=["piper", "pyttsx3", "edge", "none"],
                         default=DEFAULT_TTS, help="TTS engine (default: piper → pyttsx3 → system fallback)")
-    parser.add_argument("--gender",      choices=["male", "female"], default=None,
+    parser.add_argument("--gender",         choices=["male", "female"], default=None,
                         help="Voice gender to use (male/female). Omit to pick interactively.")
-    parser.add_argument("--voice",       default=None, help="Exact voice ID for pyttsx3 or voice name for edge-tts (overrides --gender)")
-    parser.add_argument("--edge-voice",  default=None, help="edge-tts voice name (overrides --gender for edge TTS)")
-    parser.add_argument("--piper-voice", default=None, metavar="PATH",
+    parser.add_argument("--voice",          default=None, help="Exact voice ID for pyttsx3 or voice name for edge-tts (overrides --gender)")
+    parser.add_argument("--edge-voice",     default=None, help="edge-tts voice name (overrides --gender for edge TTS)")
+    parser.add_argument("--piper-voice",    default=None, metavar="PATH",
                         help="Path to a Piper .onnx voice file (overrides --gender for Piper TTS)")
-    parser.add_argument("--rate",        type=int, default=175, help="Speech rate for pyttsx3 (default: 175)")
-    parser.add_argument("--list-voices", action="store_true", help="List available TTS voices and exit")
-    parser.add_argument("--vosk-model",  default=None, metavar="PATH",
+    parser.add_argument("--rate",           type=int, default=175, help="Speech rate for pyttsx3 (default: 175)")
+    parser.add_argument("--list-voices",    action="store_true", help="List available TTS voices and exit")
+    parser.add_argument("--vosk-model",     default=None, metavar="PATH",
                         help="Path to a Vosk model directory (auto-downloads small English model if omitted)")
-    parser.add_argument("--reconfigure", action="store_true", help="Reset saved options in .config and re-select interactively")
+    parser.add_argument("--reconfigure",    action="store_true", help="Reset saved options in .config and re-select interactively")
     return parser.parse_args()
 
 
@@ -1828,9 +1879,8 @@ def main():
         args.gender = config["gender"]
         info(f"Loaded saved voice gender from .config: {args.gender}")
 
-    if not args.wake_word or args.wake_word == DEFAULT_WAKE_WORD:
-        if config.get("wake_word"):
-            args.wake_word = config["wake_word"]
+    # ── Wake Word & Assistant Name selection ──────────────────────────────────
+    chosen_wake_word, chosen_assistant_name = select_wake_word_and_name(args, config)
 
     # ── Model selection (interactive if not given/saved) ───────────────────────
     chosen_llm_model = select_ollama_model(args.model)
@@ -1852,7 +1902,8 @@ def main():
         "gender": getattr(args, "gender", None),
         "voice": voice_id,
         "piper_voice": piper_voice_path,
-        "wake_word": args.wake_word,
+        "wake_word": chosen_wake_word,
+        "assistant_name": chosen_assistant_name,
         "rate": args.rate
     }
     save_config(new_config)
@@ -1862,7 +1913,8 @@ def main():
         tts_mode         = args.tts,
         voice_id         = voice_id,
         tts_rate         = args.rate,
-        wake_word        = args.wake_word,
+        wake_word        = chosen_wake_word,
+        assistant_name   = chosen_assistant_name,
         vosk_model_path  = chosen_vosk_path,
         piper_voice_path = piper_voice_path,
     )
