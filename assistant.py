@@ -1421,30 +1421,30 @@ def select_vosk_model(explicit_path: Optional[str]) -> str:
 PIPER_VOICE_CATALOGUE = {
     "male": [
         {
-            "name": "en_US-danny-low",
-            "desc": "Danny (Small & Fast, ~15 MB) — Ultra-low latency voice",
-            "hf_path": "en/en_US/danny/low",
-            "files": ["en_US-danny-low.onnx", "en_US-danny-low.onnx.json"],
-        },
-        {
             "name": "en_US-ryan-medium",
-            "desc": "Ryan (Medium, ~60 MB) — Balanced speed & naturalness",
+            "desc": "Ryan (Medium, ~60 MB) — ★ Balanced speed & naturalness [Default]",
             "hf_path": "en/en_US/ryan/medium",
             "files": ["en_US-ryan-medium.onnx", "en_US-ryan-medium.onnx.json"],
         },
         {
             "name": "en_US-ryan-high",
-            "desc": "Ryan (Large & High Quality, ~120 MB) — ★ Deep, studio quality male voice",
+            "desc": "Ryan (Large & High Quality, ~120 MB) — Deep, studio quality male voice",
             "hf_path": "en/en_US/ryan/high",
             "files": ["en_US-ryan-high.onnx", "en_US-ryan-high.onnx.json"],
+        },
+        {
+            "name": "en_US-danny-low",
+            "desc": "Danny (Small & Fast, ~15 MB) — Ultra-low latency voice",
+            "hf_path": "en/en_US/danny/low",
+            "files": ["en_US-danny-low.onnx", "en_US-danny-low.onnx.json"],
         },
     ],
     "female": [
         {
-            "name": "en_US-kathleen-low",
-            "desc": "Kathleen (Small & Fast, ~15 MB) — Ultra-low latency voice",
-            "hf_path": "en/en_US/kathleen/low",
-            "files": ["en_US-kathleen-low.onnx", "en_US-kathleen-low.onnx.json"],
+            "name": "en_US-libritts_r-medium",
+            "desc": "LibriTTS (Medium, ~60 MB) — ★ Natural expressive female voice [Default]",
+            "hf_path": "en/en_US/libritts_r/medium",
+            "files": ["en_US-libritts_r-medium.onnx", "en_US-libritts_r-medium.onnx.json"],
         },
         {
             "name": "en_US-amy-medium",
@@ -1454,15 +1454,15 @@ PIPER_VOICE_CATALOGUE = {
         },
         {
             "name": "en_US-lessac-high",
-            "desc": "Lessac (Large & High Quality, ~120 MB) — ★ Clear, studio quality female voice",
+            "desc": "Lessac (Large & High Quality, ~120 MB) — Clear, studio quality female voice",
             "hf_path": "en/en_US/lessac/high",
             "files": ["en_US-lessac-high.onnx", "en_US-lessac-high.onnx.json"],
         },
         {
-            "name": "en_US-libritts_r-medium",
-            "desc": "LibriTTS (Medium, ~60 MB) — Natural expressive female voice",
-            "hf_path": "en/en_US/libritts_r/medium",
-            "files": ["en_US-libritts_r-medium.onnx", "en_US-libritts_r-medium.onnx.json"],
+            "name": "en_US-kathleen-low",
+            "desc": "Kathleen (Small & Fast, ~15 MB) — Ultra-low latency voice",
+            "hf_path": "en/en_US/kathleen/low",
+            "files": ["en_US-kathleen-low.onnx", "en_US-kathleen-low.onnx.json"],
         },
     ],
 }
@@ -1512,8 +1512,8 @@ def select_tts_voice(args) -> tuple:
     voice_id       = getattr(args, "voice", None)
     gender_flag    = getattr(args, "gender", None)  # "male" | "female" | None
 
-    # ── If everything was specified on CLI, return immediately ────────────────
-    if piper_voice_path and tts_mode == "piper":
+    # ── If everything was specified on CLI or loaded from .config, return immediately ────────────────
+    if piper_voice_path and tts_mode == "piper" and os.path.isfile(piper_voice_path):
         return piper_voice_path, voice_id, tts_mode
     if voice_id and tts_mode != "piper":
         return piper_voice_path, voice_id, tts_mode
@@ -1525,14 +1525,14 @@ def select_tts_voice(args) -> tuple:
         print(f"  {c('[1]', CYAN)} {c('♂', CYAN)}  Male")
         print(f"  {c('[2]', CYAN)} {c('♀', MAGENTA)}  Female")
         print(c("─" * 40, DIM))
-        print(f"  {c('[Enter]', DIM)} default (Male)")
+        print(f"  {c('[Enter]', DIM)} default (Female — LibriTTS)")
         print()
         try:
             raw = input(f"{BOLD}Your choice (1/2): {RESET}").strip()
         except (KeyboardInterrupt, EOFError):
             print()
             raw = ""
-        gender = "female" if raw == "2" else "male"
+        gender = "male" if raw == "1" else "female"
     else:
         gender = gender_flag.lower()
 
@@ -1552,7 +1552,7 @@ def select_tts_voice(args) -> tuple:
             onnx_path = os.path.join(PIPER_VOICE_DIR, v["files"][0])
             downloaded = os.path.isfile(onnx_path)
             status = c("[Ready]", GREEN) if downloaded else c("[Download required]", YELLOW)
-            if downloaded and default_idx == 1:
+            if "libritts" in v["name"].lower():
                 default_idx = i
             choices.append((v, onnx_path, downloaded))
             print(f"  {c(f'[{i}]', CYAN)} {v['desc']}  {status}")
@@ -1705,7 +1705,12 @@ def main():
             args.vosk_model = config["vosk_model"]
             info(f"Loaded saved Vosk model from .config: {args.vosk_model}")
 
-    if not args.gender and not args.voice and not args.piper_voice and config.get("gender"):
+    if not args.piper_voice and config.get("piper_voice"):
+        if os.path.exists(config["piper_voice"]):
+            args.piper_voice = config["piper_voice"]
+            info(f"Loaded saved Piper voice model from .config: {os.path.basename(args.piper_voice)}")
+
+    if not args.gender and config.get("gender"):
         args.gender = config["gender"]
         info(f"Loaded saved voice gender from .config: {args.gender}")
 
