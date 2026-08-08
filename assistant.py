@@ -105,20 +105,20 @@ except ImportError:
 try:
     import pyaudio as _pyaudio_check
     PYAUDIO_AVAILABLE = True
-except ImportError:
+except Exception:
     PYAUDIO_AVAILABLE = False
 
 try:
     import sounddevice as _sd_check
     import numpy as _np_check
     SOUNDDEVICE_AVAILABLE = True
-except ImportError:
+except Exception:
     SOUNDDEVICE_AVAILABLE = False
 
 if not PYAUDIO_AVAILABLE and not SOUNDDEVICE_AVAILABLE:
-    error("No audio input library found. Install one of:")
-    error("  pip install pyaudio      (also needs portaudio system package)")
-    error("  pip install sounddevice numpy  (easier, no system deps on most platforms)")
+    error("No working audio input library found.")
+    error("Please install system package: sudo apt install portaudio19-dev espeak")
+    error("Or run launcher: ./run_assistant.sh")
     sys.exit(1)
 
 if not PYAUDIO_AVAILABLE:
@@ -1091,16 +1091,16 @@ PIPER_VOICE_CATALOGUE = {
     ],
     "female": [
         {
-            "name": "en_US-amy-high",
-            "desc": "Amy (high quality, ~120 MB)",
-            "hf_path": "en/en_US/amy/high",
-            "files": ["en_US-amy-high.onnx", "en_US-amy-high.onnx.json"],
+            "name": "en_US-amy-medium",
+            "desc": "Amy (medium quality, ~60 MB)",
+            "hf_path": "en/en_US/amy/medium",
+            "files": ["en_US-amy-medium.onnx", "en_US-amy-medium.onnx.json"],
         },
         {
-            "name": "en_US-kathleen-low",
-            "desc": "Kathleen (low quality, ~5 MB)",
-            "hf_path": "en/en_US/kathleen/low",
-            "files": ["en_US-kathleen-low.onnx", "en_US-kathleen-low.onnx.json"],
+            "name": "en_US-lessac-high",
+            "desc": "Lessac (high quality, ~120 MB)",
+            "hf_path": "en/en_US/lessac/high",
+            "files": ["en_US-lessac-high.onnx", "en_US-lessac-high.onnx.json"],
         },
     ],
 }

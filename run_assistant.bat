@@ -126,13 +126,13 @@ if not exist "%~dp0piper-voices\en_US-ryan-high.onnx" (
 )
 
 :: Female voice — Amy (medium)
-if not exist "%~dp0piper-voices\en_US-amy-high.onnx" (
-    echo [.] Downloading Piper voice: en_US-amy-high (~120 MB)...
-    curl -fL "!HF!/en/en_US/amy/high/en_US-amy-high.onnx" -o "%~dp0piper-voices\en_US-amy-high.onnx" >nul 2>&1
-    curl -fsSL "!HF!/en/en_US/amy/high/en_US-amy-high.onnx.json" -o "%~dp0piper-voices\en_US-amy-high.onnx.json" >nul 2>&1
-    if exist "%~dp0piper-voices\en_US-amy-high.onnx" ( echo [+] en_US-amy-high ready. ) else ( echo [!] Amy download failed - TTS will fall back. )
+if not exist "%~dp0piper-voices\en_US-amy-medium.onnx" (
+    echo [.] Downloading Piper voice: en_US-amy-medium (~60 MB)...
+    curl -fL "!HF!/en/en_US/amy/medium/en_US-amy-medium.onnx" -o "%~dp0piper-voices\en_US-amy-medium.onnx" >nul 2>&1
+    curl -fsSL "!HF!/en/en_US/amy/medium/en_US-amy-medium.onnx.json" -o "%~dp0piper-voices\en_US-amy-medium.onnx.json" >nul 2>&1
+    if exist "%~dp0piper-voices\en_US-amy-medium.onnx" ( echo [+] en_US-amy-medium ready. ) else ( echo [!] Amy download failed - TTS will fall back. )
 ) else (
-    echo [+] en_US-amy-high already present.
+    echo [+] en_US-amy-medium already present.
 )
 echo.
 

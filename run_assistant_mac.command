@@ -144,7 +144,7 @@ _dl_piper() {
 
 HF="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
 _dl_piper "en_US-ryan-high"   "$HF/en/en_US/ryan/high"   # ♂ male
-_dl_piper "en_US-amy-high"    "$HF/en/en_US/amy/high"    # ♀ female
+_dl_piper "en_US-amy-medium"  "$HF/en/en_US/amy/medium"  # ♀ female
 
 # ── Check / start Ollama ──────────────────────────────────────
 echo -e "${CYAN}[•] Checking Ollama server...${RESET}"

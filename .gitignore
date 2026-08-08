@@ -1,0 +1,14 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Large downloaded models
+piper-voices/
+vosk-models/
+*.onnx
+*.onnx.json

@@ -49,75 +49,76 @@ echo -e "${RESET}"
 
 cd "$SCRIPT_DIR" || { echo -e "${RED}Could not cd to $SCRIPT_DIR${RESET}"; read -rp "Press Enter to close..."; exit 1; }
 
-# ── Check Python ──────────────────────────────────────────────
-PYTHON=""
+# ── 1. Check & Auto-install System Packages (Linux/Debian/Ubuntu) ──────────────
+if command -v apt-get &>/dev/null; then
+    MISSING_PKGS=()
+    if ! ldconfig -p 2>/dev/null | grep -i portaudio &>/dev/null && [ ! -f /usr/include/portaudio.h ]; then
+        MISSING_PKGS+=("portaudio19-dev" "libportaudio2")
+    fi
+    if ! command -v espeak &>/dev/null; then
+        MISSING_PKGS+=("espeak")
+    fi
+    if ! dpkg-query -W -f='${Status}' python3-venv 2>/dev/null | grep -q "ok installed"; then
+        MISSING_PKGS+=("python3-venv" "python3-pip")
+    fi
+
+    if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+        echo -e "${YELLOW}[!] Missing system packages: ${MISSING_PKGS[*]}${RESET}"
+        echo -e "${CYAN}[•] Installing missing system packages via sudo...${RESET}"
+        sudo apt-get update && sudo apt-get install -y "${MISSING_PKGS[@]}" || \
+        echo -e "${YELLOW}[!] System package installation failed or was skipped.${RESET}"
+    else
+        echo -e "${GREEN}[✓] System packages ready (portaudio, espeak, venv).${RESET}"
+    fi
+fi
+
+# ── 2. Check Python ─────────────────────────────────────────────────────────────
+SYSTEM_PY=""
 for PY in python3 python; do
     if command -v "$PY" &>/dev/null; then
-        PYTHON="$PY"
+        SYSTEM_PY="$PY"
         break
     fi
 done
 
-if [ -z "$PYTHON" ]; then
-    echo -e "${RED}[✗] Python 3 not found. Please install it first.${RESET}"
+if [ -z "$SYSTEM_PY" ]; then
+    echo -e "${RED}[✗] Python 3 not found. Please install python3.${RESET}"
     read -rp "Press Enter to close..."
     exit 1
 fi
-echo -e "${GREEN}[✓] Python: $($PYTHON --version)${RESET}"
+echo -e "${GREEN}[✓] System Python: $($SYSTEM_PY --version)${RESET}"
 
-# ── Ensure pip is available, bootstrap if missing ─────────────
-echo -e "${CYAN}[•] Checking pip...${RESET}"
-
-# Make sure ~/.local/bin (user pip installs) is on PATH
-export PATH="$HOME/.local/bin:$PATH"
-
-if ! $PYTHON -m pip --version &>/dev/null; then
-    echo -e "${YELLOW}[!] pip not found — bootstrapping via ensurepip...${RESET}"
-    if ! $PYTHON -m ensurepip --upgrade 2>/dev/null; then
-        echo -e "${YELLOW}[!] ensurepip failed — downloading get-pip.py...${RESET}"
-        GET_PIP=$(mktemp /tmp/get-pip-XXXXXX.py)
-        if curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$GET_PIP" 2>/dev/null \
-           || wget -qO "$GET_PIP" https://bootstrap.pypa.io/get-pip.py 2>/dev/null; then
-            $PYTHON "$GET_PIP" --user
-            rm -f "$GET_PIP"
-        else
-            echo -e "${RED}[✗] Could not install pip. Run:  sudo apt install python3-pip${RESET}"
-            read -rp "Press Enter to close..."
-            exit 1
-        fi
-    fi
-fi
-echo -e "${GREEN}[✓] pip: $($PYTHON -m pip --version 2>&1 | head -1)${RESET}"
-
-# Detect if this Python uses PEP 668 (externally-managed env, e.g. Python 3.14 on Debian/Ubuntu)
-# In that case we must pass --break-system-packages
-PIP_FLAGS="--user"
-if $PYTHON -m pip install --dry-run pip &>/dev/null; then
-    : # normal pip
-elif $PYTHON -m pip install --user --break-system-packages --dry-run pip &>/dev/null 2>&1; then
-    PIP_FLAGS="--user --break-system-packages"
+# ── 3. Setup & Activate Virtual Environment ─────────────────────────────────────
+VENV_DIR="$SCRIPT_DIR/venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo -e "${CYAN}[•] Creating virtual environment ($VENV_DIR)...${RESET}"
+    $SYSTEM_PY -m venv "$VENV_DIR" || {
+        echo -e "${YELLOW}[!] venv creation failed — retrying with sudo apt install python3-venv...${RESET}"
+        sudo apt-get install -y python3-venv python3-pip
+        $SYSTEM_PY -m venv "$VENV_DIR"
+    }
 fi
 
-# ── Install Python dependencies ───────────────────────────────
-echo -e "${CYAN}[•] Installing/checking Python dependencies...${RESET}"
-if ! $PYTHON -m pip install $PIP_FLAGS -r "$SCRIPT_DIR/requirements.txt"; then
-    # Retry with --break-system-packages in case env is externally managed
-    echo -e "${YELLOW}[!] Retrying with --break-system-packages...${RESET}"
-    if ! $PYTHON -m pip install --user --break-system-packages -r "$SCRIPT_DIR/requirements.txt"; then
-        echo -e "${RED}[✗] Failed to install dependencies from requirements.txt${RESET}"
-        read -rp "Press Enter to close..."
-        exit 1
-    fi
-fi
-echo -e "${GREEN}[✓] Dependencies ready.${RESET}"
+PYTHON="$VENV_DIR/bin/python"
+PIP="$VENV_DIR/bin/pip"
 
-# ── Install Piper TTS + pygame (neural voice, fully offline) ───────────
+# Ensure pip is up-to-date inside venv
+$PIP install --upgrade pip setuptools wheel 2>/dev/null
+
+# ── 4. Install Python Dependencies ──────────────────────────────────────────────
+echo -e "${CYAN}[•] Installing/checking Python dependencies in virtualenv...${RESET}"
+if ! $PIP install -r "$SCRIPT_DIR/requirements.txt"; then
+    echo -e "${YELLOW}[!] Installing via requirements.txt encountered an error. Installing fallback sounddevice + numpy...${RESET}"
+    $PIP install SpeechRecognition vosk pyttsx3 ollama sounddevice numpy
+fi
+echo -e "${GREEN}[✓] Python dependencies ready.${RESET}"
+
+# ── 5. Install Piper TTS + pygame ───────────────────────────────────────────────
 echo -e "${CYAN}[•] Installing Piper TTS and pygame...${RESET}"
-$PYTHON -m pip install $PIP_FLAGS piper-tts pygame 2>/dev/null \
-    || $PYTHON -m pip install --user --break-system-packages piper-tts pygame 2>/dev/null \
-    || echo -e "${YELLOW}[!] piper-tts install failed — TTS will fall back to espeak.${RESET}"
+$PIP install piper-tts pygame 2>/dev/null \
+    || echo -e "${YELLOW}[!] piper-tts install failed — TTS will fall back to pyttsx3/espeak.${RESET}"
 
-# ── Download Piper voice models (male + female) if not already present ────────
+# ── 6. Download Piper Voice Models ──────────────────────────────────────────────
 PIPER_DIR="$SCRIPT_DIR/piper-voices"
 mkdir -p "$PIPER_DIR"
 
@@ -143,40 +144,44 @@ _dl_piper() {
 
 HF="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
 _dl_piper "en_US-ryan-high"   "$HF/en/en_US/ryan/high"   # ♂ male
-_dl_piper "en_US-amy-high"    "$HF/en/en_US/amy/high"    # ♀ female
+_dl_piper "en_US-amy-medium"  "$HF/en/en_US/amy/medium"  # ♀ female
 
-# ── Start Ollama if not already running ───────────────────────
-if ! curl -sf http://localhost:11434 &>/dev/null; then
-    echo -e "${CYAN}[•] Starting Ollama server in the background...${RESET}"
-    ollama serve &>/tmp/ollama_serve.log &
-    OLLAMA_PID=$!
-    # Give it a moment to boot
-    for i in {1..10}; do
-        sleep 1
-        if curl -sf http://localhost:11434 &>/dev/null; then
-            echo -e "${GREEN}[✓] Ollama server ready.${RESET}"
-            break
-        fi
-        if [ "$i" -eq 10 ]; then
-            echo -e "${YELLOW}[!] Ollama server may not be running. Check: ollama serve${RESET}"
-        fi
-    done
+# ── 7. Start Ollama Server & Pull Default Model if needed ───────────────────────
+if command -v ollama &>/dev/null; then
+    if ! curl -sf http://localhost:11434 &>/dev/null; then
+        echo -e "${CYAN}[•] Starting Ollama server in the background...${RESET}"
+        ollama serve &>/tmp/ollama_serve.log &
+        for i in {1..10}; do
+            sleep 1
+            if curl -sf http://localhost:11434 &>/dev/null; then
+                echo -e "${GREEN}[✓] Ollama server ready.${RESET}"
+                break
+            fi
+        done
+    else
+        echo -e "${GREEN}[✓] Ollama server running.${RESET}"
+    fi
+
+    # Check if any model exists, pull llama3.2:3b if none
+    MODELS=$(ollama list 2>/dev/null | tail -n +2)
+    if [ -z "$MODELS" ]; then
+        echo -e "${CYAN}[•] No Ollama models found. Pulling default model llama3.2:3b...${RESET}"
+        ollama pull llama3.2:3b
+    fi
 else
-    echo -e "${GREEN}[✓] Ollama server already running.${RESET}"
+    echo -e "${YELLOW}[!] Ollama CLI not found. Download from https://ollama.com${RESET}"
 fi
 
 echo ""
 
-# ── Build argument list ────────────────────────────────────────────────
-CMD_ARGS=()
-
-# ── Run the assistant ────────────────────────────────────────────────
-$PYTHON "$SCRIPT_DIR/assistant.py" "${CMD_ARGS[@]}" "$@"
+# ── 8. Launch the Assistant ─────────────────────────────────────────────────────
+echo -e "${GREEN}[🚀] Launching Voice Assistant...${RESET}\n"
+$PYTHON "$SCRIPT_DIR/assistant.py" "$@"
 EXIT_CODE=$?
 
 echo ""
 if [ $EXIT_CODE -ne 0 ]; then
-    echo -e "${RED}[✗] Assistant exited with error code $EXIT_CODE.${RESET}"
+    echo -e "${RED}[✗] Assistant exited with code $EXIT_CODE.${RESET}"
 fi
 
 read -rp "Press Enter to close this window..."
