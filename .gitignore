@@ -13,6 +13,8 @@ vosk-models/
 *.onnx
 *.onnx.json
 
-# Local runtime config
+# Local runtime config & memory
 .config
+.memory
+
 

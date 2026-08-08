@@ -503,6 +503,13 @@ class SpeechListener:
         else:
             return self._listen_sounddevice(self.timeout, self.phrase_limit)
 
+    def listen_once_timeout(self, timeout: float = 5.0) -> Optional[str]:
+        """Listen for one utterance with custom timeout."""
+        if self._use_pyaudio:
+            return self._listen_pyaudio(timeout, self.phrase_limit)
+        else:
+            return self._listen_sounddevice(timeout, self.phrase_limit)
+
     def _listen_pyaudio(self, timeout, phrase_limit) -> Optional[str]:
         """Capture audio via PyAudio + SpeechRecognition."""
         with self._mic_lock:
@@ -618,6 +625,40 @@ class SpeechListener:
         return wake_word.lower() in text.lower().split()
 
 
+# ─── Long-term Memory (.memory) ───────────────────────────────────────────────
+MEMORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".memory")
+
+def load_memory() -> list:
+    """Load list of remembered facts from .memory."""
+    if os.path.isfile(MEMORY_FILE):
+        try:
+            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    return data
+        except Exception as e:
+            warn(f"Could not load .memory ({e})")
+    return []
+
+def save_memory(facts: list):
+    """Save list of remembered facts to .memory."""
+    try:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(facts, f, indent=2)
+    except Exception as e:
+        warn(f"Could not save .memory ({e})")
+
+def add_memory_fact(fact: str) -> bool:
+    """Add a new fact to .memory file."""
+    facts = load_memory()
+    clean = fact.strip()
+    if clean and clean not in facts:
+        facts.append(clean)
+        save_memory(facts)
+        return True
+    return False
+
+
 # ─── Ollama Client ─────────────────────────────────────────────────────────────
 class OllamaLLM:
     def __init__(self, model: str = DEFAULT_MODEL):
@@ -627,6 +668,37 @@ class OllamaLLM:
     def reset(self):
         self.history.clear()
 
+    def _get_system_prompt(self) -> str:
+        prompt = SYSTEM_PROMPT
+        facts = load_memory()
+        if facts:
+            facts_str = "\n".join(f"- {f}" for f in facts)
+            prompt += f"\n\nLong-term Memory (Stored User Facts):\n{facts_str}"
+        return prompt
+
+    def warmup(self):
+        """Warm up model in VRAM/RAM with a small 1-token prompt for instant TTFT."""
+        info("Pre-warming Ollama LLM into memory for ultra-fast response...")
+        try:
+            if OLLAMA_LIB_AVAILABLE:
+                ollama_client.generate(model=self.model, prompt="hi", options={"num_predict": 1})
+            else:
+                payload = _json.dumps({
+                    "model": self.model,
+                    "prompt": "hi",
+                    "options": {"num_predict": 1},
+                    "stream": False
+                }).encode()
+                req = urllib.request.Request(
+                    "http://localhost:11434/api/generate",
+                    data=payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                urllib.request.urlopen(req, timeout=10)
+            success("LLM pre-warmed & ready in memory!")
+        except Exception as e:
+            warn(f"LLM pre-warm note ({e})")
+
     def _trim_history(self):
         if len(self.history) > CONVERSATION_HIST * 2:
             self.history = self.history[-(CONVERSATION_HIST * 2):]
@@ -635,7 +707,7 @@ class OllamaLLM:
         self.history.append({"role": "user", "content": user_input})
         self._trim_history()
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + self.history
+        messages = [{"role": "system", "content": self._get_system_prompt()}] + self.history
 
         if OLLAMA_LIB_AVAILABLE:
             return self._chat_lib(messages)
@@ -717,6 +789,7 @@ class VoiceAssistant:
   Wake word: {c(f'"{self.wake_word}"', YELLOW)}
   TTS      : {c(self.tts.mode, MAGENTA)}
   Commands : {c('say "reset" to clear history', DIM)}
+             {c('say "remember [fact]" to store long-term memory', DIM)}
              {c('say "stop" to interrupt AI speech', DIM)}
              {c('say "quit" or press Ctrl+C to exit', DIM)}
 """
@@ -732,6 +805,9 @@ class VoiceAssistant:
             error("Start it with: ollama serve")
             sys.exit(1)
         success(f"Ollama ready with model '{self.llm.model}'")
+
+        # Warm up Ollama LLM into GPU/RAM for instant TTFT
+        self.llm.warmup()
 
         # Calibrate mic
         self.listener.calibrate()
@@ -770,7 +846,7 @@ class VoiceAssistant:
             self._handle_query(inline_query)
 
     def _handle_query(self, prefill: str = ""):
-        """Capture command (with optional prefill) and respond."""
+        """Capture command and enter 30-second conversational follow-up window."""
         if prefill:
             user_input = prefill
             user_label(user_input)
@@ -783,16 +859,83 @@ class VoiceAssistant:
                 return
             user_label(user_input)
 
-        # Special commands
+        # Process initial query
+        if not self._process_and_respond(user_input):
+            return
+
+        # ── 30-Second Conversational Follow-Up Window ───────────────────────────
+        # Listens directly for questions without needing to say "hey" after every answer!
+        FOLLOWUP_WINDOW = 30.0
+        followup_start  = time.time()
+
+        while (time.time() - followup_start < FOLLOWUP_WINDOW) and self._running:
+            remaining = int(FOLLOWUP_WINDOW - (time.time() - followup_start))
+            print(f"\r{c(f'💬 Conversational follow-up mode active ({remaining}s remaining — speak directly without wake word)...', CYAN)}", end="", flush=True)
+
+            text = self.listener.listen_once_timeout(timeout=4.0)
+            if not text or not text.strip():
+                continue
+
+            text = text.strip()
+            print()  # Clear status line
+
+            # Strip wake word if repeated in follow-up mode
+            words = text.lower().split()
+            if self.wake_word in words:
+                idx  = words.index(self.wake_word)
+                text = " ".join(words[idx + 1:]).strip()
+                if not text:
+                    self.tts.speak("Yes?")
+                    followup_start = time.time()
+                    continue
+
+            user_label(text)
+            should_continue = self._process_and_respond(text)
+            if should_continue:
+                # Reset 30s timer after replying so user can continue asking follow-ups!
+                followup_start = time.time()
+            else:
+                break
+
+        print(f"\n{BOLD}Listening for wake word: \"{self.wake_word}\" ...{RESET}\n")
+
+    def _process_and_respond(self, user_input: str) -> bool:
+        """Process user input, handle special/memory commands, and chat. Returns False if exiting."""
         cmd = user_input.lower().strip()
+
+        # Special commands
         if cmd in ("quit", "exit", "bye", "goodbye"):
             self._running = False
-            return
+            return False
         if cmd in ("reset", "clear history", "start over"):
             self.llm.reset()
             success("Conversation history cleared.")
             self.tts.speak("Okay, starting fresh!")
-            return
+            return True
+
+        # Memory commands
+        if cmd.startswith("remember "):
+            fact = user_input[9:].strip()
+            if fact:
+                add_memory_fact(fact)
+                success(f"Saved to .memory: {fact}")
+                self.tts.speak("I have saved that to my long term memory.")
+            return True
+        if cmd in ("clear memory", "forget memory", "reset memory"):
+            save_memory([])
+            success("Long-term memory cleared.")
+            self.tts.speak("Long term memory cleared.")
+            return True
+        if cmd in ("what do you remember", "show memory", "list memory"):
+            facts = load_memory()
+            if facts:
+                facts_text = ". ".join(facts)
+                info(f"Memory: {facts_text}")
+                self.tts.speak(f"Here is what I remember: {facts_text}")
+            else:
+                info("Memory is empty.")
+                self.tts.speak("I don't have any saved memories yet.")
+            return True
 
         # Query LLM
         info("Thinking...")
@@ -801,7 +944,7 @@ class VoiceAssistant:
 
         # Speak response (interruptible with "stop")
         self._speak_with_stop_listener(response)
-        print(f"\n{BOLD}Listening for wake word: \"{self.wake_word}\" ...{RESET}\n")
+        return True
 
     def _speak_with_stop_listener(self, text: str):
         """
@@ -912,6 +1055,16 @@ VOSK_STANDARD_MODELS = [
         "desc": "Medium English (128 MB) — Balanced accuracy & speed [Default]",
         "localZip": _LGRAPH_LOCAL_ZIP,
         "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
+    },
+    {
+        "name": "vosk-model-en-us-daanzu-20200905",
+        "desc": "Daanzu Dictation (920 MB / ~500 MB graph) — ★ High Accuracy for Dictation & Speech",
+        "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-daanzu-20200905.zip"
+    },
+    {
+        "name": "vosk-model-en-us-librispeech-0.2",
+        "desc": "LibriSpeech English (845 MB) — ★ High Accuracy (845MB LibriSpeech dataset)",
+        "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-librispeech-0.2.zip"
     },
     {
         "name": "vosk-model-en-us-0.22",
