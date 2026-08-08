@@ -12,3 +12,7 @@ piper-voices/
 vosk-models/
 *.onnx
 *.onnx.json
+
+# Local runtime config
+.config
+

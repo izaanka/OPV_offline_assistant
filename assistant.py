@@ -1259,11 +1259,38 @@ def select_tts_voice(args) -> tuple:
                 raw3 = ""
             idx3 = (int(raw3) - 1) if raw3.isdigit() and 1 <= int(raw3) <= len(filtered) else 0
             success(f"Selected: {filtered[idx3].name}")
+            args.gender = gender
             return None, filtered[idx3].id, tts_mode
         except Exception as e:
             warn(f"Could not enumerate pyttsx3 voices ({e}) — using default.")
 
+    args.gender = gender
     return None, None, tts_mode
+
+
+# ─── Configuration Persistence (.config) ───────────────────────────────────────
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".config")
+
+def load_config() -> dict:
+    """Load configuration from .config file if present."""
+    if os.path.isfile(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            warn(f"Could not load configuration from .config ({e})")
+    return {}
+
+def save_config(cfg: dict):
+    """Save configuration to .config file."""
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        success(f"Saved active configuration to .config")
+    except Exception as e:
+        warn(f"Could not save configuration to .config ({e})")
 
 
 # ─── Entry Point ───────────────────────────────────────────────────────────────
@@ -1277,6 +1304,7 @@ Examples:
   python assistant.py --model mistral
   python assistant.py --model llama3 --tts edge --edge-voice en-US-JennyNeural
   python assistant.py --wake-word jarvis --rate 160
+  python assistant.py --reconfigure
   python assistant.py --list-voices
         """
     )
@@ -1295,13 +1323,33 @@ Examples:
     parser.add_argument("--list-voices", action="store_true", help="List available TTS voices and exit")
     parser.add_argument("--vosk-model",  default=None, metavar="PATH",
                         help="Path to a Vosk model directory (auto-downloads small English model if omitted)")
+    parser.add_argument("--reconfigure", action="store_true", help="Reset saved options in .config and re-select interactively")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    config = load_config() if not args.reconfigure else {}
 
-    # ── Model selection (interactive if not given) ────────────────────────────
+    # Restore saved options if CLI flags were omitted
+    if not args.model and config.get("model"):
+        args.model = config["model"]
+        info(f"Loaded saved LLM model from .config: {args.model}")
+
+    if not args.vosk_model and config.get("vosk_model"):
+        if os.path.exists(config["vosk_model"]):
+            args.vosk_model = config["vosk_model"]
+            info(f"Loaded saved Vosk model from .config: {args.vosk_model}")
+
+    if not args.gender and not args.voice and not args.piper_voice and config.get("gender"):
+        args.gender = config["gender"]
+        info(f"Loaded saved voice gender from .config: {args.gender}")
+
+    if not args.wake_word or args.wake_word == DEFAULT_WAKE_WORD:
+        if config.get("wake_word"):
+            args.wake_word = config["wake_word"]
+
+    # ── Model selection (interactive if not given/saved) ───────────────────────
     chosen_llm_model = select_ollama_model(args.model)
     chosen_vosk_path = select_vosk_model(args.vosk_model)
 
@@ -1312,6 +1360,19 @@ def main():
     if args.tts == "piper" and not piper_voice_path:
         warn("No Piper voice resolved — falling back to pyttsx3.")
         args.tts = "pyttsx3"
+
+    # Save active configuration to .config for future bootups
+    new_config = {
+        "model": chosen_llm_model,
+        "vosk_model": chosen_vosk_path,
+        "tts": args.tts,
+        "gender": getattr(args, "gender", None),
+        "voice": voice_id,
+        "piper_voice": piper_voice_path,
+        "wake_word": args.wake_word,
+        "rate": args.rate
+    }
+    save_config(new_config)
 
     assistant = VoiceAssistant(
         model            = chosen_llm_model,
@@ -1332,3 +1393,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
