@@ -715,45 +715,67 @@ def fetch_online_weather(location: str = "auto") -> Optional[str]:
         return None
 
 
-def fetch_online_search(query: str) -> Optional[str]:
-    """Fetch live web search results from DuckDuckGo HTML for news, climate, current affairs, etc."""
+def fetch_universal_web_search(query: str) -> Optional[str]:
+    """Search the web as a whole for any topic using DuckDuckGo + Wikipedia APIs."""
     import urllib.parse
     import urllib.request
     import html
     import re
+
+    results = []
+    clean_q = query.strip()
+
+    # 1. DuckDuckGo Web Search (POST method for reliable HTML search results)
     try:
-        encoded = urllib.parse.quote(query.strip())
-        url = f"https://html.duckduckgo.com/html/?q={encoded}"
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        url = "https://html.duckduckgo.com/html/"
+        data = urllib.parse.urlencode({"q": clean_q}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://html.duckduckgo.com/"
         })
         with urllib.request.urlopen(req, timeout=5) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
+            titles = re.findall(r'<a class="result__a"[^>]*>(.*?)</a>', body, re.DOTALL)
             snippets = re.findall(r'<a class="result__snippet[^"]*"[^>]*>(.*?)</a>', body, re.DOTALL)
-            results = []
-            for s in snippets[:3]:
-                clean = re.sub(r'<[^>]+>', '', s)
-                clean = html.unescape(clean).strip()
-                if clean:
-                    results.append(clean)
-            if results:
-                return "\n".join(f"- {r}" for r in results)
+            for t, s in zip(titles[:3], snippets[:3]):
+                t_clean = html.unescape(re.sub(r'<[^>]+>', '', t)).strip()
+                s_clean = html.unescape(re.sub(r'<[^>]+>', '', s)).strip()
+                if t_clean and s_clean:
+                    results.append(f"• {t_clean}: {s_clean}")
     except Exception as e:
-        warn(f"Web search note: {e}")
+        warn(f"Web search note ({e})")
+
+    # 2. Wikipedia Search API fallback / supplement for knowledge queries
+    if len(results) < 2:
+        try:
+            url_wiki = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(clean_q)}&format=json"
+            req_wiki = urllib.request.Request(url_wiki, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req_wiki, timeout=4) as resp:
+                data_wiki = json.loads(resp.read().decode("utf-8", errors="ignore"))
+                items = data_wiki.get("query", {}).get("search", [])
+                for item in items[:2]:
+                    title = item.get("title", "")
+                    snippet = html.unescape(re.sub(r'<[^>]+>', '', item.get("snippet", "")))
+                    if title and snippet:
+                        results.append(f"• Wikipedia ({title}): {snippet}")
+        except Exception:
+            pass
+
+    if results:
+        return "\n".join(results)
     return None
 
 
 def get_online_context(user_input: str) -> Optional[str]:
-    """Detect if user query needs online weather, climate, news, or web search info, and return live data."""
-    text_lower = user_input.lower()
+    """Detect if user query requires live weather or general web search as a whole."""
+    text_lower = user_input.lower().strip()
     import re
 
-    # Weather & Climate detection
+    # 1. Weather & Climate detection
     weather_keywords = ["weather", "climate", "temperature", "forecast", "how hot", "how cold", "rain", "rainy", "snow", "sunny", "humidity"]
     if any(k in text_lower for k in weather_keywords):
         m = re.search(r"\b(?:in|at|for|near)\s+([a-zA-Z\s]+)\b", user_input, re.IGNORECASE)
         location = m.group(1).strip() if m else "auto"
-        # Clean up trailing words
         for kw in ["today", "right now", "tomorrow", "this week", "currently"]:
             location = location.split(kw)[0].strip()
         info(f"🌐 Fetching online weather for '{location}'...")
@@ -762,11 +784,25 @@ def get_online_context(user_input: str) -> Optional[str]:
             success("Retrieved live weather data!")
             return f"Live Real-Time Weather Data:\n{weather_info}"
 
-    # News, Current Affairs & Real-time Web Search detection
-    news_search_keywords = ["news", "current affairs", "latest", "recent", "today", "yesterday", "what happened", "who won", "score", "stock price", "who is the current", "what is the current", "price of"]
-    if any(k in text_lower for k in news_search_keywords) or text_lower.startswith("search ") or text_lower.startswith("google "):
-        info(f"🌐 Searching live web for '{user_input}'...")
-        search_info = fetch_online_search(user_input)
+    # 2. Universal Web Search as a whole for knowledge, news, facts, or questions
+    skip_phrases = {
+        "hi", "hello", "hey", "how are you", "thanks", "thank you", "bye", "goodbye",
+        "quit", "exit", "stop", "reset", "clear memory", "show memory", "what do you remember",
+        "i'm good", "i'm fine", "doing well", "nothing much", "just relaxing", "no thanks", "yes", "no", "okay", "ok"
+    }
+    if text_lower in skip_phrases:
+        return None
+
+    web_triggers = [
+        "what", "who", "where", "when", "why", "how", "is ", "are ", "can ", "could ",
+        "tell me", "search", "lookup", "find", "news", "price", "score", "latest",
+        "recent", "today", "history", "definition", "explain", "meaning"
+    ]
+    should_search = any(text_lower.startswith(t) or f" {t}" in text_lower for t in web_triggers) or ("?" in text_lower) or (len(text_lower.split()) >= 3)
+
+    if should_search:
+        info(f"🌐 Searching the web for '{user_input}'...")
+        search_info = fetch_universal_web_search(user_input)
         if search_info:
             success("Retrieved live web search results!")
             return f"Live Real-Time Web Search Results:\n{search_info}"
