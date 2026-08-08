@@ -914,9 +914,9 @@ VOSK_STANDARD_MODELS = [
         "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
     },
     {
-        "name": "vosk-model-en-us-0.42-giga",
-        "desc": "Giga English (1.4 GB) — ★ High Accuracy (Trained on 14,000h speech)",
-        "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.42-giga.zip"
+        "name": "vosk-model-en-us-0.42-gigaspeech",
+        "desc": "GigaSpeech English (2.3 GB) — ★ High Accuracy (Trained on 14,000h Gigaspeech)",
+        "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.42-gigaspeech.zip"
     },
     {
         "name": "vosk-model-en-in-0.5",
