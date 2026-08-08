@@ -688,6 +688,92 @@ def auto_extract_facts(text: str):
             info(f"Auto-remembered: User likes {fav}")
 
 
+# ─── Online Knowledge & Web Tools ──────────────────────────────────────────────
+
+def fetch_online_weather(location: str = "auto") -> Optional[str]:
+    """Fetch live weather data from wttr.in for a given location or auto IP location."""
+    import urllib.parse
+    import urllib.request
+    try:
+        loc_clean = location.strip() if location and location.strip().lower() != "auto" else ""
+        loc_encoded = urllib.parse.quote(loc_clean)
+        url = f"https://wttr.in/{loc_encoded}?format=j1"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            curr = data["current_condition"][0]
+            area = data["nearest_area"][0]["areaName"][0]["value"]
+            country = data["nearest_area"][0]["country"][0]["value"]
+            temp_c = curr["temp_C"]
+            temp_f = curr["temp_F"]
+            desc = curr["weatherDesc"][0]["value"]
+            humidity = curr["humidity"]
+            wind = curr["windspeedKmph"]
+            return f"Current weather in {area}, {country}: {desc}, {temp_c}°C ({temp_f}°F), Humidity: {humidity}%, Wind: {wind} km/h."
+    except Exception as e:
+        warn(f"Weather lookup note: {e}")
+        return None
+
+
+def fetch_online_search(query: str) -> Optional[str]:
+    """Fetch live web search results from DuckDuckGo HTML for news, climate, current affairs, etc."""
+    import urllib.parse
+    import urllib.request
+    import html
+    import re
+    try:
+        encoded = urllib.parse.quote(query.strip())
+        url = f"https://html.duckduckgo.com/html/?q={encoded}"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        })
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = resp.read().decode("utf-8", errors="ignore")
+            snippets = re.findall(r'<a class="result__snippet[^"]*"[^>]*>(.*?)</a>', body, re.DOTALL)
+            results = []
+            for s in snippets[:3]:
+                clean = re.sub(r'<[^>]+>', '', s)
+                clean = html.unescape(clean).strip()
+                if clean:
+                    results.append(clean)
+            if results:
+                return "\n".join(f"- {r}" for r in results)
+    except Exception as e:
+        warn(f"Web search note: {e}")
+    return None
+
+
+def get_online_context(user_input: str) -> Optional[str]:
+    """Detect if user query needs online weather, climate, news, or web search info, and return live data."""
+    text_lower = user_input.lower()
+    import re
+
+    # Weather & Climate detection
+    weather_keywords = ["weather", "climate", "temperature", "forecast", "how hot", "how cold", "rain", "rainy", "snow", "sunny", "humidity"]
+    if any(k in text_lower for k in weather_keywords):
+        m = re.search(r"\b(?:in|at|for|near)\s+([a-zA-Z\s]+)\b", user_input, re.IGNORECASE)
+        location = m.group(1).strip() if m else "auto"
+        # Clean up trailing words
+        for kw in ["today", "right now", "tomorrow", "this week", "currently"]:
+            location = location.split(kw)[0].strip()
+        info(f"🌐 Fetching online weather for '{location}'...")
+        weather_info = fetch_online_weather(location)
+        if weather_info:
+            success("Retrieved live weather data!")
+            return f"Live Real-Time Weather Data:\n{weather_info}"
+
+    # News, Current Affairs & Real-time Web Search detection
+    news_search_keywords = ["news", "current affairs", "latest", "recent", "today", "yesterday", "what happened", "who won", "score", "stock price", "who is the current", "what is the current", "price of"]
+    if any(k in text_lower for k in news_search_keywords) or text_lower.startswith("search ") or text_lower.startswith("google "):
+        info(f"🌐 Searching live web for '{user_input}'...")
+        search_info = fetch_online_search(user_input)
+        if search_info:
+            success("Retrieved live web search results!")
+            return f"Live Real-Time Web Search Results:\n{search_info}"
+
+    return None
+
+
 # ─── Ollama Client ─────────────────────────────────────────────────────────────
 class OllamaLLM:
     def __init__(self, model: str = DEFAULT_MODEL):
@@ -733,7 +819,14 @@ class OllamaLLM:
             self.history = self.history[-(CONVERSATION_HIST * 2):]
 
     def chat(self, user_input: str) -> str:
-        self.history.append({"role": "user", "content": user_input})
+        # Check if online context (weather, news, search) is needed
+        online_ctx = get_online_context(user_input)
+
+        effective_input = user_input
+        if online_ctx:
+            effective_input = f"{user_input}\n\n[{online_ctx}]"
+
+        self.history.append({"role": "user", "content": effective_input})
         self._trim_history()
 
         messages = [{"role": "system", "content": self._get_system_prompt()}] + self.history
