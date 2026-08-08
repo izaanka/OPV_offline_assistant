@@ -91,8 +91,11 @@ except ImportError:
 
 try:
     import pygame
+    import pygame.mixer
+    pygame.mixer.init()
+    pygame.mixer.quit()
     PYGAME_AVAILABLE = True
-except ImportError:
+except Exception:
     PYGAME_AVAILABLE = False
 
 try:
@@ -404,30 +407,32 @@ class TTSEngine:
     def _play_audio_interruptible(self, path: str) -> bool:
         """Play audio file; returns False if stopped early."""
         if PYGAME_AVAILABLE:
-            pygame.mixer.init()
-            pygame.mixer.music.load(path)
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy():
-                if self._stop_event.is_set():
-                    pygame.mixer.music.stop()
-                    return False
-                time.sleep(0.05)
-            return True
+            try:
+                pygame.mixer.init()
+                pygame.mixer.music.load(path)
+                pygame.mixer.music.play()
+                while pygame.mixer.music.get_busy():
+                    if self._stop_event.is_set():
+                        pygame.mixer.music.stop()
+                        return False
+                    time.sleep(0.05)
+                return True
+            except Exception as e:
+                warn(f"PyGame playback error ({e}) — falling back to system audio player.")
+
+        # Fallback: system player
+        _os = _platform.system()
+        if _os == "Darwin":
+            cmd = f"afplay '{path}'"
+        elif _os == "Windows":
+            cmd = f'powershell -NoProfile -Command "(New-Object System.Media.SoundPlayer \'{path}\').PlaySync()"'
         else:
-            # Fallback: system player (not interruptible)
-            _os = _platform.system()
-            if _os == "Darwin":
-                cmd = f"afplay '{path}'"
-            elif _os == "Windows":
-                cmd = f'powershell -NoProfile -Command "(New-Object System.Media.SoundPlayer \'{path}\').PlaySync()"'
+            if path.endswith(".wav"):
+                cmd = f"aplay -q '{path}' 2>/dev/null || paplay '{path}' 2>/dev/null || ffplay -nodisp -autoexit '{path}' 2>/dev/null"
             else:
-                if path.endswith(".wav"):
-                    cmd = f"aplay -q '{path}' 2>/dev/null || paplay '{path}' 2>/dev/null"
-                else:
-                    cmd = f"mpg123 -q '{path}' 2>/dev/null"
-                cmd += f" || ffplay -nodisp -autoexit '{path}' 2>/dev/null"
-            os.system(cmd)
-            return True
+                cmd = f"mpg123 -q '{path}' 2>/dev/null || ffplay -nodisp -autoexit '{path}' 2>/dev/null"
+        os.system(cmd)
+        return True
 
 
 # ─── Speech Recognition ────────────────────────────────────────────────────────
