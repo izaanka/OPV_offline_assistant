@@ -903,16 +903,35 @@ _LGRAPH_LOCAL_ZIP = os.path.join(_SCRIPT_DIR, "vosk-model-en-us-0.22-lgraph.zip"
 
 VOSK_STANDARD_MODELS = [
     {
-        "name": "vosk-model-small-en-us-0.15",
-        "desc": "Small (40 MB) — Fast, good for older / low-power CPUs",
-        "url": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
-    },
-    {
         "name": "vosk-model-en-us-0.22-lgraph",
-        "desc": "Medium (128 MB) — Good accuracy, low RAM, recommended",
-        # Prefer the bundled local zip; fall back to remote download
+        "desc": "Medium English (128 MB) — Balanced accuracy & speed [Default]",
         "localZip": _LGRAPH_LOCAL_ZIP,
         "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22-lgraph.zip"
+    },
+    {
+        "name": "vosk-model-en-us-0.22",
+        "desc": "Large English (1.8 GB) — ★ Highest Accuracy (Full 128k vocabulary)",
+        "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.22.zip"
+    },
+    {
+        "name": "vosk-model-en-us-0.42-giga",
+        "desc": "Giga English (1.4 GB) — ★ High Accuracy (Trained on 14,000h speech)",
+        "url": "https://alphacephei.com/vosk/models/vosk-model-en-us-0.42-giga.zip"
+    },
+    {
+        "name": "vosk-model-en-in-0.5",
+        "desc": "Large Indian English (1.0 GB) — ★ High Accuracy for Indian Accents",
+        "url": "https://alphacephei.com/vosk/models/vosk-model-en-in-0.5.zip"
+    },
+    {
+        "name": "vosk-model-small-en-in-0.4",
+        "desc": "Small Indian English (36 MB) — Fast, tuned for Indian Accents",
+        "url": "https://alphacephei.com/vosk/models/vosk-model-small-en-in-0.4.zip"
+    },
+    {
+        "name": "vosk-model-small-en-us-0.15",
+        "desc": "Small English (40 MB) — Lightweight for low-power CPUs",
+        "url": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
     },
 ]
 
