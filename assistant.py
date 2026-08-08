@@ -626,10 +626,17 @@ class SpeechListener:
     def contains_wake_word(self, text: str, wake_word: str) -> bool:
         return wake_word.lower() in text.lower().split()
 
-# ─── Phonetic Aliases & City/Name Gazetteer Normalization ───────────────────────
+# ─── Phonetic Aliases & Complex Noun Gazetteer Normalization ───────────────────────
 ALIASES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".aliases.json")
+COMPLEX_NOUNS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "complex_nouns.json")
 
 DEFAULT_ALIASES = {
+    "stella": "Stellar",
+    "stelar": "Stellar",
+    "teller": "Stellar",
+    "heystella": "hey Stellar",
+    "heystellar": "hey Stellar",
+    "histellar": "hey Stellar",
     "is on": "Izaan",
     "is an": "Izaan",
     "eyes on": "Izaan",
@@ -666,6 +673,42 @@ GLOBAL_CITIES = [
 ]
 CITY_LOWER_MAP = {c.lower(): c for c in GLOBAL_CITIES}
 
+def soundex_code(word: str) -> str:
+    """Compute 4-character Soundex phonetic code for a word."""
+    import re
+    w = re.sub(r'[^A-Za-z]', '', word).upper()
+    if not w:
+        return ''
+    code = w[0]
+    mapping = {'B': '1', 'F': '1', 'P': '1', 'V': '1',
+               'C': '2', 'G': '2', 'J': '2', 'K': '2', 'Q': '2', 'S': '2', 'X': '2', 'Z': '2',
+               'D': '3', 'T': '3',
+               'L': '4',
+               'M': '5', 'N': '5',
+               'R': '6'}
+    for char in w[1:]:
+        if char in mapping:
+            digit = mapping[char]
+            if digit != code[-1]:
+                code += digit
+    return code[:4].ljust(4, '0')
+
+def load_complex_nouns() -> dict:
+    """Load complex nouns dictionary and index by lower and soundex."""
+    nouns = set(GLOBAL_CITIES)
+    nouns.update(["Stellar", "Izaan"])
+    if os.path.isfile(COMPLEX_NOUNS_FILE):
+        try:
+            with open(COMPLEX_NOUNS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    nouns.update(data)
+        except Exception:
+            pass
+    lower_map = {n.lower(): n for n in nouns}
+    soundex_map = {soundex_code(n): n for n in nouns}
+    return lower_map, soundex_map
+
 def load_aliases() -> dict:
     """Load phonetic sound-alike mappings from .aliases.json."""
     aliases = dict(DEFAULT_ALIASES)
@@ -690,7 +733,7 @@ def save_alias(phrase: str, correction: str):
         warn(f"Could not save .aliases.json ({e})")
 
 def normalize_utterance(text: str) -> str:
-    """Post-process raw speech-to-text output using phonetic aliases & city gazetteer fuzzy matching."""
+    """Post-process raw speech-to-text output using phonetic aliases, Soundex & complex noun matching."""
     if not text:
         return text
 
@@ -705,7 +748,8 @@ def normalize_utterance(text: str) -> str:
         pattern = re.compile(r'\b' + re.escape(phrase) + r'\b', re.IGNORECASE)
         result = pattern.sub(correction, result)
 
-    # 2. Fuzzy city correction after prepositions (in, at, near, for, weather, climate, from)
+    # 2. Complex noun & city fuzzy phonetic correction
+    noun_lower_map, noun_soundex_map = load_complex_nouns()
     words = result.split()
     corrected_words = []
     i = 0
@@ -713,16 +757,37 @@ def normalize_utterance(text: str) -> str:
         word = words[i]
         clean_w = re.sub(r'[^a-zA-Z]', '', word).lower()
         prev = words[i-1].lower() if i > 0 else ''
-        if prev in ('in', 'at', 'near', 'for', 'weather', 'climate', 'from') and len(clean_w) >= 3:
-            if clean_w in CITY_LOWER_MAP:
-                corrected_words.append(CITY_LOWER_MAP[clean_w])
-                i += 1
-                continue
-            matches = difflib.get_close_matches(clean_w, CITY_LOWER_MAP.keys(), n=1, cutoff=0.7)
-            if matches:
-                corrected_words.append(CITY_LOWER_MAP[matches[0]])
-                i += 1
-                continue
+
+        if len(clean_w) >= 3:
+            # Check city preposition context
+            if prev in ('in', 'at', 'near', 'for', 'weather', 'climate', 'from'):
+                if clean_w in CITY_LOWER_MAP:
+                    corrected_words.append(CITY_LOWER_MAP[clean_w])
+                    i += 1
+                    continue
+                matches = difflib.get_close_matches(clean_w, CITY_LOWER_MAP.keys(), n=1, cutoff=0.7)
+                if matches:
+                    corrected_words.append(CITY_LOWER_MAP[matches[0]])
+                    i += 1
+                    continue
+
+            # Soundex & sequence matcher correction for complex technical/proper nouns
+            if len(clean_w) >= 4:
+                sx = soundex_code(clean_w)
+                if sx in noun_soundex_map:
+                    candidate = noun_soundex_map[sx]
+                    ratio = difflib.SequenceMatcher(None, clean_w, candidate.lower()).ratio()
+                    if ratio >= 0.55:
+                        corrected_words.append(candidate)
+                        i += 1
+                        continue
+
+                matches = difflib.get_close_matches(clean_w, noun_lower_map.keys(), n=1, cutoff=0.75)
+                if matches:
+                    corrected_words.append(noun_lower_map[matches[0]])
+                    i += 1
+                    continue
+
         corrected_words.append(word)
         i += 1
 
