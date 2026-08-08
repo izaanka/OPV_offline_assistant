@@ -4,10 +4,11 @@ vosk>=0.3.45                # 100% on-device speech recognition (no internet)
 pyttsx3>=2.90               # offline text-to-speech
 ollama>=0.2.0               # Ollama Python client
 piper-tts>=1.2.0            # offline neural TTS
-pygame>=2.5.0               # audio playback engine
-
-# Audio input options
 sounddevice>=0.4.6          # cross-platform microphone capture
 numpy>=1.24.0               # audio buffer processing
-pyaudio>=0.2.13             # PyAudio (optional backend)
+
+# Optional acceleration packages (installed automatically if system libraries exist)
+# pyaudio>=0.2.13
+# pygame>=2.5.0
+
 

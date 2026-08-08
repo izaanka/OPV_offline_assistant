@@ -61,6 +61,9 @@ if command -v apt-get &>/dev/null; then
     if ! dpkg-query -W -f='${Status}' python3-venv 2>/dev/null | grep -q "ok installed"; then
         MISSING_PKGS+=("python3-venv" "python3-pip")
     fi
+    if [ ! -f /usr/include/SDL2/SDL.h ] && ! command -v sdl2-config &>/dev/null; then
+        MISSING_PKGS+=("libsdl2-dev")
+    fi
 
     if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
         echo -e "${YELLOW}[!] Missing system packages: ${MISSING_PKGS[*]}${RESET}"
@@ -68,7 +71,7 @@ if command -v apt-get &>/dev/null; then
         sudo apt-get update && sudo apt-get install -y "${MISSING_PKGS[@]}" || \
         echo -e "${YELLOW}[!] System package installation failed or was skipped.${RESET}"
     else
-        echo -e "${GREEN}[✓] System packages ready (portaudio, espeak, venv).${RESET}"
+        echo -e "${GREEN}[✓] System packages ready (portaudio, espeak, venv, sdl2).${RESET}"
     fi
 fi
 
@@ -107,16 +110,13 @@ $PIP install --upgrade pip setuptools wheel 2>/dev/null
 
 # ── 4. Install Python Dependencies ──────────────────────────────────────────────
 echo -e "${CYAN}[•] Installing/checking Python dependencies in virtualenv...${RESET}"
-if ! $PIP install -r "$SCRIPT_DIR/requirements.txt"; then
-    echo -e "${YELLOW}[!] Installing via requirements.txt encountered an error. Installing fallback sounddevice + numpy...${RESET}"
-    $PIP install SpeechRecognition vosk pyttsx3 ollama sounddevice numpy
-fi
-echo -e "${GREEN}[✓] Python dependencies ready.${RESET}"
+$PIP install -r "$SCRIPT_DIR/requirements.txt" || \
+    $PIP install SpeechRecognition vosk pyttsx3 ollama sounddevice numpy piper-tts
 
-# ── 5. Install Piper TTS + pygame ───────────────────────────────────────────────
-echo -e "${CYAN}[•] Installing Piper TTS and pygame...${RESET}"
-$PIP install piper-tts pygame 2>/dev/null \
-    || echo -e "${YELLOW}[!] piper-tts install failed — TTS will fall back to pyttsx3/espeak.${RESET}"
+# Attempt optional hardware/audio acceleration packages
+$PIP install pygame 2>/dev/null || $PIP install pygame-ce 2>/dev/null || true
+$PIP install pyaudio 2>/dev/null || true
+echo -e "${GREEN}[✓] Python dependencies ready.${RESET}"
 
 # ── 6. Download Piper Voice Models ──────────────────────────────────────────────
 PIPER_DIR="$SCRIPT_DIR/piper-voices"
