@@ -742,6 +742,10 @@ def normalize_utterance(text: str) -> str:
 
     result = text
 
+    # Fix common STT weather phrase mishears (e.g. "what's to further in" -> "what's the weather in")
+    result = re.sub(r"\bwhat'?s?\s+(?:to|the)\s+further\b", "what's the weather", result, flags=re.IGNORECASE)
+    result = re.sub(r"\bwhat\s+is\s+(?:to|the)\s+further\b", "what is the weather", result, flags=re.IGNORECASE)
+
     # 1. Apply phonetic aliases
     aliases = load_aliases()
     for phrase, correction in aliases.items():
