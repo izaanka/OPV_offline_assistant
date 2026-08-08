@@ -142,10 +142,11 @@ PHRASE_LIMIT       = 15         # max seconds per utterance
 AMBIENT_DURATION   = 1.0        # seconds to calibrate microphone noise
 CONVERSATION_HIST  = 10         # how many turns to keep in context
 
-SYSTEM_PROMPT = """You are a helpful, conversational AI voice assistant.
-Keep your responses concise and natural for speech — aim for 1-3 sentences unless more detail is clearly needed.
-Do not use markdown formatting, bullet points, or special characters in responses.
-Speak naturally as if in a conversation."""
+SYSTEM_PROMPT = """You are a warm, friendly, and empathetic companion and voice assistant.
+Speak casually and naturally like a real human friend — relaxed, conversational, and concise (aim for 1-2 short natural sentences).
+NEVER use robotic AI clichés like "functioning properly", "I don't have feelings like humans do", "as an AI", or formal corporate scripts.
+If you know the user's name or facts from long-term memory, address them by their name naturally in conversation.
+Do not use markdown formatting, bullet points, or special symbols."""
 
 # ─── TTS Engine ────────────────────────────────────────────────────────────────
 class TTSEngine:
@@ -658,6 +659,34 @@ def add_memory_fact(fact: str) -> bool:
         return True
     return False
 
+def auto_extract_facts(text: str):
+    """Automatically detect personal facts (name, location, preferences) and save to .memory."""
+    import re
+    text_clean = text.strip()
+
+    # Name detection (e.g. "my name is Izaan", "i'm Izaan", "call me Izaan")
+    m_name = re.search(r"\b(?:my name is|call me|i'm|i am)\s+([A-Z][a-z]+|[a-z]+)\b", text_clean, re.IGNORECASE)
+    if m_name:
+        name = m_name.group(1).capitalize()
+        ignore = {"good", "fine", "ok", "okay", "happy", "sad", "tired", "busy", "relaxing", "just", "doing", "here", "ready", "trying", "sure", "not", "great", "awesome", "cool", "back", "done", "alone", "bored", "late", "well"}
+        if name.lower() not in ignore and len(name) > 1:
+            if add_memory_fact(f"User's name is {name}"):
+                info(f"Auto-remembered: User's name is {name}")
+
+    # Location detection (e.g. "i live in Delhi", "i'm from London")
+    m_loc = re.search(r"\b(?:i live in|i'm from|i am from)\s+([a-zA-Z\s]+)\b", text_clean, re.IGNORECASE)
+    if m_loc:
+        loc = m_loc.group(1).strip().title()
+        if len(loc) > 2 and add_memory_fact(f"User lives in {loc}"):
+            info(f"Auto-remembered: User lives in {loc}")
+
+    # Favorites / Likes detection (e.g. "my favorite language is Python", "i love pizza")
+    m_like = re.search(r"\b(?:my favorite|i love|i really like)\s+([a-zA-Z0-9\s]{3,30})\b", text_clean, re.IGNORECASE)
+    if m_like:
+        fav = m_like.group(1).strip()
+        if add_memory_fact(f"User likes {fav}"):
+            info(f"Auto-remembered: User likes {fav}")
+
 
 # ─── Ollama Client ─────────────────────────────────────────────────────────────
 class OllamaLLM:
@@ -870,14 +899,14 @@ class VoiceAssistant:
 
         while (time.time() - followup_start < FOLLOWUP_WINDOW) and self._running:
             remaining = int(FOLLOWUP_WINDOW - (time.time() - followup_start))
-            print(f"\r{c(f'💬 Conversational follow-up mode active ({remaining}s remaining — speak directly without wake word)...', CYAN)}", end="", flush=True)
+            print(f"\r\033[K{c(f'💬 Conversational follow-up active ({remaining}s remaining — speak directly)...', CYAN)}", end="", flush=True)
 
             text = self.listener.listen_once_timeout(timeout=4.0)
             if not text or not text.strip():
                 continue
 
             text = text.strip()
-            print()  # Clear status line
+            print("\r\033[K", end="", flush=True)  # Clear status line before printing user label
 
             # Strip wake word if repeated in follow-up mode
             words = text.lower().split()
@@ -897,11 +926,14 @@ class VoiceAssistant:
             else:
                 break
 
-        print(f"\n{BOLD}Listening for wake word: \"{self.wake_word}\" ...{RESET}\n")
+        print(f"\r\033[K\n{BOLD}Listening for wake word: \"{self.wake_word}\" ...{RESET}\n")
 
     def _process_and_respond(self, user_input: str) -> bool:
-        """Process user input, handle special/memory commands, and chat. Returns False if exiting."""
+        """Process user input, handle special/memory commands, auto-extract facts, and chat. Returns False if exiting."""
         cmd = user_input.lower().strip()
+
+        # Auto-extract any facts (like name, location, likes) automatically from user speech
+        auto_extract_facts(user_input)
 
         # Special commands
         if cmd in ("quit", "exit", "bye", "goodbye"):
