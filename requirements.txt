@@ -1,14 +1,20 @@
 # Core dependencies
 SpeechRecognition>=3.10.0   # audio capture + VAD
-vosk>=0.3.45                # 100% on-device speech recognition (no internet)
+vosk>=0.3.45                # offline speech recognition (dictionary fallback)
 pyttsx3>=2.90               # offline text-to-speech
 ollama>=0.2.0               # Ollama Python client
 piper-tts>=1.2.0            # offline neural TTS
 sounddevice>=0.4.6          # cross-platform microphone capture
 numpy>=1.24.0               # audio buffer processing
 
+# Modern STT pipeline
+faster-whisper>=1.0.0       # BPE subword STT with GPU acceleration
+g2p-en>=2.1.0               # Neural grapheme-to-phoneme for phonetic matching
+
 # Optional acceleration packages (installed automatically if system libraries exist)
 # pyaudio>=0.2.13
 # pygame>=2.5.0
 
+# Modules dependencies
+beautifulsoup4>=4.12.0
 

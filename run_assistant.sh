@@ -42,9 +42,7 @@ BOLD="\033[1m"; CYAN="\033[96m"; GREEN="\033[92m"
 YELLOW="\033[93m"; RED="\033[91m"; RESET="\033[0m"
 
 echo -e "${BOLD}${CYAN}"
-echo "╔══════════════════════════════════════════════╗"
-echo "║       🎙️  Local AI Voice Assistant           ║"
-echo "╚══════════════════════════════════════════════╝"
+echo "Starting OPV Voice Assistant..."
 echo -e "${RESET}"
 
 cd "$SCRIPT_DIR" || { echo -e "${RED}Could not cd to $SCRIPT_DIR${RESET}"; read -rp "Press Enter to close..."; exit 1; }
@@ -61,6 +59,9 @@ if command -v apt-get &>/dev/null; then
     if ! dpkg-query -W -f='${Status}' python3-venv 2>/dev/null | grep -q "ok installed"; then
         MISSING_PKGS+=("python3-venv" "python3-pip")
     fi
+    if ! python3 -c "import tkinter" &>/dev/null; then
+        MISSING_PKGS+=("python3-tk")
+    fi
     if [ ! -f /usr/include/SDL2/SDL.h ] && ! command -v sdl2-config &>/dev/null; then
         MISSING_PKGS+=("libsdl2-dev")
     fi
@@ -71,8 +72,9 @@ if command -v apt-get &>/dev/null; then
         sudo apt-get update && sudo apt-get install -y "${MISSING_PKGS[@]}" || \
         echo -e "${YELLOW}[!] System package installation failed or was skipped.${RESET}"
     else
-        echo -e "${GREEN}[✓] System packages ready (portaudio, espeak, venv, sdl2).${RESET}"
+        echo -e "${GREEN}[✓] System packages ready (portaudio, espeak, venv, tk, sdl2).${RESET}"
     fi
+
 fi
 
 # ── 2. Check Python ─────────────────────────────────────────────────────────────
@@ -175,7 +177,7 @@ fi
 echo ""
 
 # ── 8. Launch the Assistant ─────────────────────────────────────────────────────
-echo -e "${GREEN}[🚀] Launching Voice Assistant...${RESET}\n"
+echo -e "${GREEN}[INFO] Launching Voice Assistant...${RESET}\n"
 $PYTHON "$SCRIPT_DIR/assistant.py" "$@"
 EXIT_CODE=$?
 

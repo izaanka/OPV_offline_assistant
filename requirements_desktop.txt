@@ -1,0 +1,21 @@
+# ── OS Desktop Automation Libraries ──────────────────────────────────────────
+# These packages are available for LLM-generated tools to import at runtime.
+# Install with: pip install -r requirements_desktop.txt
+
+# Input & Window Control
+pyautogui>=0.9.54
+pynput>=1.7.6
+pyperclip>=1.8.2
+
+# System & Process Management
+psutil>=5.9.0
+
+# Screen Capture & OCR
+Pillow>=10.0.0
+pytesseract>=0.3.10
+
+# Audio Control (Linux — PulseAudio)
+pulsectl>=23.5.0
+
+# Display Brightness
+screen-brightness-control>=0.22.0

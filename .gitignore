@@ -20,3 +20,5 @@ vosk-models/
 
 
 
+*.db
+*.wav
